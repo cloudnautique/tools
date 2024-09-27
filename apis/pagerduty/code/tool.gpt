@@ -1,0 +1,15 @@
+Name: getAllIncidents
+Description: Gets the incidents
+Context: pd_cred_read_context
+
+#!/usr/bin/env node --no-warnings ${GPTSCRIPT_TOOL_DIR}/index.js getAllIncidents
+---
+Name: getIncident
+Description: Get a specific incident
+params: incident_id: ID of the incident to fetch
+Context: pd_cred_read_context
+
+#!/usr/bin/env node --no-warnings ${GPTSCRIPT_TOOL_DIR}/index.js getIncident
+---
+Name: pd_cred_read_context
+Share Credential: github.com/gptscript-ai/gateway-oauth2 as pagerduty.read with PAGERDUTY_BEARER_TOKEN as env and pagerduty-test as integration 
