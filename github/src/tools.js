@@ -471,3 +471,201 @@ export async function listUserOrgs(octokit) {
         console.log('Failed to create dataset:', e);
     }
 }
+
+export async function createBranch(octokit, owner, repo, branchName, baseBranchName = 'main') {
+    try {
+        // Get the SHA of the latest commit on the base branch
+        const { data: refData } = await octokit.git.getRef({
+            owner,
+            repo,
+            ref: `heads/${baseBranchName}`
+        });
+
+        const sha = refData.object.sha;
+
+        // Create a new branch at the same commit
+        const { data: newBranch } = await octokit.git.createRef({
+            owner,
+            repo,
+            ref: `refs/heads/${branchName}`,
+            sha: sha
+        });
+
+        console.log(`Created branch '${branchName}' from '${baseBranchName}' at commit ${sha.substring(0, 7)} - https://github.com/${owner}/${repo}/tree/${branchName}`);
+        return newBranch;
+    } catch (error) {
+        if (error.status === 422) {
+            console.error(`Error: Branch '${branchName}' already exists`);
+        } else {
+            console.error(`Error creating branch: ${error.message}`);
+        }
+        throw error;
+    }
+}
+
+export async function getFileContent(octokit, owner, repo, path, branch = 'main') {
+    try {
+        const { data } = await octokit.repos.getContent({
+            owner,
+            repo,
+            path,
+            ref: branch
+        });
+
+        // If the result is a file (not a directory)
+        if (!Array.isArray(data)) {
+            // The content is Base64 encoded
+            const content = Buffer.from(data.content, 'base64').toString();
+            console.log(`Retrieved content of file '${path}' from branch '${branch}'`);
+            console.log(content);
+            return {
+                content,
+                sha: data.sha
+            };
+        } else {
+            throw new Error(`The path '${path}' points to a directory, not a file`);
+        }
+    } catch (error) {
+        if (error.status === 404) {
+            console.log(`File '${path}' not found on branch '${branch}'`);
+            return { content: null, sha: null };
+        } else {
+            console.error(`Error retrieving file content: ${error.message}`);
+            throw error;
+        }
+    }
+}
+
+export async function createOrUpdateFile(octokit, owner, repo, path, content, message, branch, sha = null) {
+    try {
+        // Base64 encode the content
+        const contentEncoded = Buffer.from(content).toString('base64');
+
+        const params = {
+            owner,
+            repo,
+            path,
+            message,
+            content: contentEncoded,
+            branch
+        };
+
+        // If sha is provided, it's an update operation
+        if (sha) {
+            params.sha = sha;
+        }
+
+        const { data } = await octokit.repos.createOrUpdateFileContents(params);
+
+        const operation = sha ? 'Updated' : 'Created';
+        console.log(`${operation} file '${path}' on branch '${branch}' - ${data.commit.html_url}`);
+
+        return data;
+    } catch (error) {
+        console.error(`Error ${sha ? 'updating' : 'creating'} file: ${error.message}`);
+        throw error;
+    }
+}
+
+export async function deleteFile(octokit, owner, repo, path, message, branch, sha) {
+    try {
+        if (!sha) {
+            // Get the sha of the file first if not provided
+            const fileData = await getFileContent(octokit, owner, repo, path, branch);
+            if (!fileData.sha) {
+                throw new Error(`File '${path}' not found on branch '${branch}'`);
+            }
+            sha = fileData.sha;
+        }
+
+        const { data } = await octokit.repos.deleteFile({
+            owner,
+            repo,
+            path,
+            message,
+            sha,
+            branch
+        });
+
+        console.log(`Deleted file '${path}' from branch '${branch}' - ${data.commit.html_url}`);
+        return data;
+    } catch (error) {
+        console.error(`Error deleting file: ${error.message}`);
+        throw error;
+    }
+}
+
+export async function listRepoContents(octokit, owner, repo, path = '', branch = 'main') {
+    try {
+        const { data } = await octokit.repos.getContent({
+            owner,
+            repo,
+            path,
+            ref: branch
+        });
+
+        try {
+            const gptscriptClient = new GPTScript();
+
+            // If data is an array, it's a directory listing
+            const contents = Array.isArray(data) ? data : [data];
+
+            // Format the contents for display and dataset
+            const elements = contents.map(item => {
+                const type = item.type;
+                const itemPath = item.path;
+                const url = item.html_url;
+
+                return {
+                    name: `${item.sha}`,
+                    description: '',
+                    contents: `${type}: ${itemPath} - ${url}`
+                };
+            });
+
+            if (elements.length > 0) {
+                const datasetName = path ?
+                    `${owner}_${repo}_${branch}_${path.replace(/\//g, '_')}` :
+                    `${owner}_${repo}_${branch}_root`;
+
+                const datasetDescription = path ?
+                    `Contents of ${path} in ${owner}/${repo} (branch: ${branch})` :
+                    `Root contents of ${owner}/${repo} (branch: ${branch})`;
+
+                const datasetID = await gptscriptClient.addDatasetElements(elements, {
+                    name: datasetName,
+                    description: datasetDescription
+                });
+
+                console.log(`Created dataset with ID ${datasetID} with ${elements.length} items`);
+
+                // Also print to console for direct viewing
+                console.log(`\nContents of ${path || 'root directory'} in ${owner}/${repo} (branch: ${branch}):`);
+                elements.forEach(element => {
+                    console.log(element.contents);
+                });
+            } else {
+                console.log(`No contents found in ${path || 'root directory'}`);
+            }
+        } catch (e) {
+            console.log('Failed to create dataset:', e);
+
+            // Still print the contents even if dataset creation fails
+            if (Array.isArray(data)) {
+                console.log(`\nContents of ${path || 'root directory'} in ${owner}/${repo} (branch: ${branch}):`);
+                data.forEach(item => {
+                    console.log(`${item.type}: ${item.path} - ${item.html_url}`);
+                });
+            } else {
+                console.log(`Item: ${data.path} (${data.type}) - ${data.html_url}`);
+            }
+        }
+    } catch (error) {
+        if (error.status === 404) {
+            console.error(`Path '${path}' not found in ${owner}/${repo} (branch: ${branch})`);
+        } else {
+            console.error(`Error retrieving repository contents: ${error.message}`);
+        }
+        throw error;
+    }
+}

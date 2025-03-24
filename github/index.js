@@ -22,6 +22,11 @@ import {
     getUser,
     getJobLogs,
     listUserOrgs,
+    createBranch,
+    getFileContent,
+    createOrUpdateFile,
+    deleteFile,
+    listRepoContents,
 } from './src/tools.js';
 
 if (process.argv.length !== 3) {
@@ -106,6 +111,21 @@ try {
             break;
         case 'listUserOrgs':
             await listUserOrgs(octokit);
+            break;
+        case 'createBranch':
+            await createBranch(octokit, process.env.OWNER, process.env.REPO, process.env.BRANCHNAME, process.env.BASEBRANCHNAME);
+            break;
+        case 'getFileContent':
+            await getFileContent(octokit, process.env.OWNER, process.env.REPO, process.env.PATH, process.env.BRANCH);
+            break;
+        case 'createOrUpdateFile':
+            await createOrUpdateFile(octokit, process.env.OWNER, process.env.REPO, process.env.PATH, process.env.CONTENT, process.env.MESSAGE, process.env.BRANCH, process.env.SHA);
+            break;
+        case 'deleteFile':
+            await deleteFile(octokit, process.env.OWNER, process.env.REPO, process.env.PATH, process.env.MESSAGE, process.env.BRANCH, process.env.SHA);
+            break;
+        case 'listRepoContents':
+            await listRepoContents(octokit, process.env.OWNER, process.env.REPO, process.env.PATH, process.env.BRANCH);
             break;
         default:
             throw new Error(`Unknown command: ${command}`);
